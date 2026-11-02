@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.nexus.app"
+    namespace = "com.nexus.proxy"
     compileSdk = 35
 
     defaultConfig {
