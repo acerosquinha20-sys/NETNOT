@@ -5,6 +5,9 @@ import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.*
 import android.graphics.Color
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.IBinder
@@ -32,6 +35,8 @@ class OverlayService : Service() {
     private var homePing: TextView? = null
     private var homeBtn: Button? = null
     private var currentPkg = ""
+    private var fovOverlay: FovView? = null
+    private var fovSize = 180
     private var lastQuery = 0L
     @Volatile private var pingMs = -1L
     private val games = setOf("com.dts.freefireth", "com.dts.freefiremax")
@@ -55,7 +60,7 @@ class OverlayService : Service() {
             .createNotificationChannel(NotificationChannel("nx", "Nexus Proxy", NotificationManager.IMPORTANCE_LOW))
         startForeground(1, Notification.Builder(this, "nx").setContentTitle("Nexus Proxy ativo")
             .setSmallIcon(android.R.drawable.ic_menu_manage).build())
-        buildFloat(); buildBar()
+        buildFloat(); buildBar(); buildFov()
         handler.post(poll); handler.post(pinger)
     }
 
@@ -65,6 +70,7 @@ class OverlayService : Service() {
         floatView?.let { runCatching { wm.removeView(it) } }
         panel?.let { runCatching { wm.removeView(it) } }
         bar?.let { runCatching { wm.removeView(it) } }
+        fovOverlay?.let { runCatching { wm.removeView(it) } }
         super.onDestroy()
     }
 
@@ -97,6 +103,41 @@ class OverlayService : Service() {
             true
         }
         floatView = iv; wm.addView(iv, p)
+    }
+
+
+    // ---------- FOV visual de teste: círculo vermelho, sem aquisição de alvo ----------
+    private fun buildFov() {
+        fovSize = prefs.getInt("fov_size", 180).coerceIn(40, 360)
+        val v = FovView(this)
+        val p = lp(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, false, false)
+            .apply { gravity = Gravity.TOP or Gravity.START }
+        fovOverlay = v
+        wm.addView(v, p)
+    }
+
+    private fun updateFov() {
+        fovOverlay?.invalidate()
+    }
+
+    private inner class FovView(c: Context) : View(c) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val cx = width / 2f
+            val cy = height / 2f
+            val radius = Ui.dp(context, fovSize) / 2f
+            paint.strokeWidth = Ui.dp(context, 2).toFloat()
+            paint.color = Ui.RED
+            paint.alpha = 220
+            paint.setShadowLayer(Ui.dp(context, 10).toFloat(), 0f, 0f, Ui.RED)
+            canvas.drawCircle(cx, cy, radius, paint)
+            paint.clearShadowLayer()
+            paint.style = Paint.Style.FILL
+            paint.alpha = 170
+            canvas.drawCircle(cx, cy, Ui.dp(context, 2).toFloat(), paint)
+            paint.style = Paint.Style.STROKE
+        }
     }
 
     // ---------- Barra no topo quando o Free Fire está aberto ----------
@@ -169,7 +210,26 @@ class OverlayService : Service() {
                         prefs.edit().putString("host", host.text.toString().trim()).putString("port", port.text.toString().trim()).apply()
                         Toast.makeText(context, "Salvo", Toast.LENGTH_SHORT).show()
                     } }, gap)
-                c.addView(Ui.text(this, "Permissão do sistema: " + if (ProxyManager.hasPerm(this)) "✔" else "✘ (veja no app)", 12f, Color.LTGRAY))
+                c.addView(Ui.text(this, "Permissão do sistema: " + if (ProxyManager.hasPerm(this)) "✔" else "✘ (veja no app)", 12f, Color.LTGRAY), gap)
+                c.addView(Ui.text(this, "FOV VISUAL • TESTE", 13f, Ui.RED, true), gap)
+                val fovLabel = Ui.text(this, "Tamanho: ${fovSize}", 12f, Color.LTGRAY)
+                c.addView(fovLabel, gap)
+                val seek = SeekBar(this).apply {
+                    max = 320
+                    progress = fovSize - 40
+                    setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                        override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                            fovSize = progress + 40
+                            fovLabel.text = "Tamanho: ${fovSize}"
+                            prefs.edit().putInt("fov_size", fovSize).apply()
+                            updateFov()
+                        }
+                        override fun onStartTrackingTouch(sb: SeekBar?) {}
+                        override fun onStopTrackingTouch(sb: SeekBar?) {}
+                    })
+                }
+                c.addView(seek, gap)
+                c.addView(Ui.text(this, "Somente círculo visual vermelho; não controla mira nem lê dados do jogo.", 11f, Color.GRAY), gap)
             }
             1 -> {
                 homeProxy = Ui.text(this, "", 16f, Color.WHITE, true)
